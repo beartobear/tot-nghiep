@@ -1,43 +1,61 @@
-annotated-types==0.7.0
+# Core FastAPI & ASGI
+fastapi==0.115.11
+uvicorn==0.34.0
+starlette==0.46.1
+
+# Whisper Transcription
+# Note: `faster-whisper` relies on `ctranslate2` and `onnxruntime`.
+# On GPU-enabled Docker you may prefer `onnxruntime-gpu` with a wheel
+# that matches your CUDA version. If you don't need GPU, CPU `onnxruntime`
+# is fine. If installation fails on Linux, consider using the provided
+# Dockerfile which installs system deps for building wheels.
+faster-whisper==1.1.1
+ctranslate2==4.5.0  # Linux wheels recommended; for CUDA builds follow ctranslate2 docs
+onnxruntime>=1.15.1,<2.0  # For GPU use `onnxruntime-gpu` matching CUDA on host
+
+# Audio/Video Processing
+# PyAV (`av`) requires system FFmpeg and libav* development headers
+# (installed in the Dockerfile). Keep `ffmpeg-python` for high-level control.
+av==14.2.0  # Requires system libav* headers (see Dockerfile)
+ffmpeg-python==0.2.0  # Thêm vào để xử lý audio
+
+# Summarization
+sumy==0.11.0
+nltk==3.8.1
+
+# Database
+sqlalchemy==2.0.35
+
+# File/Network
+aiofiles==24.1.0
+requests==2.32.3
+python-multipart==0.0.20
+
+# Utilities
+pydantic==2.10.6
+python-dotenv==1.0.1
+numpy==2.2.3
+tqdm==4.67.1
+
+# System
 anyio==4.8.0
-av==14.2.0
 certifi==2025.1.31
 charset-normalizer==3.4.1
 click==8.1.8
 coloredlogs==15.0.1
-ctranslate2==4.5.0
-fastapi==0.115.11
-faster-whisper==1.1.1
 filelock==3.17.0
 flatbuffers==25.2.10
 fsspec==2025.3.0
 h11==0.14.0
-huggingface-hub==0.29.2
 humanfriendly==10.0
 idna==3.10
-mpmath==1.3.0
-numpy==2.2.3
-onnxruntime==1.21.0
 packaging==24.2
-protobuf==6.30.0
-pydantic[email]==2.10.6
-pydantic_core==2.27.2
-python-multipart==0.0.20
 PyYAML==6.0.2
-requests==2.32.3
 setuptools==75.8.2
 sniffio==1.3.1
-starlette==0.46.1
-sympy==1.13.3
-tokenizers==0.21.0
-tqdm==4.67.1
 typing_extensions==4.12.2
 urllib3==2.3.0
-uvicorn==0.34.0
 wheel==0.45.1
-sumy==0.11.0
-nltk==3.8.1
-sqlalchemy==2.0.35
-psycopg2-binary==2.9.10
-python-dotenv==1.0.1
-aiofiles==24.1.0
+# `pydantic-core` will be resolved automatically to a compatible version
+# by pip according to `pydantic==2.10.6`. Explicit pin removed to avoid
+# mismatched/unavailable wheel errors in some Python/CUDA environments.

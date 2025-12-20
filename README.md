@@ -1,167 +1,79 @@
-Bản thảo `README.md` của bạn đã rất đầy đủ về mặt nội dung. Tuy nhiên, để chuyên nghiệp hơn và thu hút người dùng (đặc biệt là trên GitHub), mình đã tối ưu lại cấu trúc, thêm các biểu tượng (emoji) trực quan và định dạng lại các khối mã nguồn để dễ theo dõi hơn.
+🎙️ Whisper Transcription API with Meeting Management
+Hệ thống cung cấp API chuyển đổi giọng nói thành văn bản (Speech-to-Text) hiệu suất cao sử dụng Faster-Whisper, tích hợp quản lý cuộc họp, tự động tóm tắt nội dung và lưu trữ dữ liệu.
 
-Dưới đây là phiên bản **README.md** đã được nâng cấp:
+✨ Tính năng chính
+Transcription Hiệu Suất Cao: Sử dụng faster-whisper hỗ trợ tăng tốc trên cả CPU và GPU (NVIDIA CUDA).
 
----
+Quản lý Cuộc họp: API đầy đủ cho các thao tác CRUD (Tạo, Đọc, Cập nhật, Xóa) cuộc họp.
 
-# 🎙️ Whisper Pro
+Tự động Tóm tắt: Sử dụng thư viện sumy (LSA Summarizer) để tóm tắt nội dung sau khi phiên âm.
 
-### **AI-Powered Speech-to-Text & Meeting Management System**
+Xử lý Bất đồng bộ: File âm thanh được xử lý dưới background task để không gây nghẽn API.
 
-**Whisper Pro** là giải pháp chuyển đổi giọng nói thành văn bản hiệu năng cao, tích hợp quản lý cuộc họp thông minh. Hệ thống được xây dựng trên nền tảng **FastAPI** và **faster-whisper**, cho phép xử lý âm thanh tốc độ cao, tóm tắt nội dung tự động và quản lý lịch trình tập trung.
+Hỗ trợ Lịch (Calendar): Endpoint trả về dữ liệu tương thích với FullCalendar.
 
----
+Dockerized: Sẵn sàng triển khai nhanh chóng với Docker và Docker Compose.
 
-## ✨ Tính năng nổi bật
+🛠️ Công nghệ sử dụng
+Backend: FastAPI (Python 3.10+)
 
-### 🔊 Công nghệ Phiên âm (Speech-to-Text)
+AI Model: Faster-Whisper (Large-v3, Base, etc.)
 
-* **Engine:** Sử dụng `faster-whisper` cho tốc độ xử lý vượt trội so với phiên bản tiêu chuẩn.
-* **Đa dạng đầu vào:** Hỗ trợ upload file (MP3, WAV, M4A, FLAC...) hoặc ghi âm trực tiếp từ trình duyệt.
-* **Tính năng thông minh:** - Tự động nhận diện ngôn ngữ.
-* Xuất Word timestamps (mốc thời gian từng từ).
-* Tích hợp VAD (Voice Activity Detection) để loại bỏ khoảng lặng.
-* Batched inference giúp tối ưu hóa hiệu suất phần cứng.
+Database: SQLAlchemy với SQLite (mặc định)
 
+Summarization: Sumy (Natural Language Processing)
 
+Containerization: Docker, NVIDIA Container Toolkit (cho GPU)
 
-### 📝 Quản lý & Tóm tắt AI
+Cách 1: Sử dụng Docker (Khuyến nghị)
+Yêu cầu: Đã cài đặt Docker và Docker Compose. Nếu dùng GPU, hãy cài thêm NVIDIA Container Toolkit.
 
-* **Tóm tắt tự động:** Sử dụng thuật toán LSA (via Sumy) để trích xuất nội dung chính của cuộc họp.
-* **Định dạng xuất bản:** Hỗ trợ xuất dữ liệu ra các định dạng chuyên dụng: `.txt`, `.srt` (phụ đề), và `.json`.
+Clone dự án và di chuyển vào thư mục gốc.
 
-### 📅 Quản lý cuộc họp (Meeting Management)
+Khởi chạy hệ thống:
 
-* **Lịch biểu trực quan:** Hiển thị và quản lý cuộc họp qua giao diện **FullCalendar**.
-* **Quản lý thực thể:** Lưu trữ thông tin chi tiết về thời gian, địa điểm (Online/Offline), chủ trì và thành viên tham dự.
-* **Workflow tự động:** Upload file ghi âm → Phiên âm → Tóm tắt → Lưu trữ vào hồ sơ cuộc họp chỉ với 1 click.
+Bash
 
-### 🌐 Giao diện hiện đại
+docker-compose up -d --build
+Hệ thống sẽ tự động khởi tạo database tại data/app.db và chạy server tại cổng 8000.
 
-* Giao diện Web Responsive xây dựng với **TailwindCSS**.
-* Trải nghiệm mượt mà, hỗ trợ cả 3 chế độ: Upload, Live Record và Calendar Task.
+Cách 2: Cài đặt thủ công
+Tạo môi trường ảo:
 
----
+Bash
 
-## 🏗️ Cấu trúc dự án
-
-```text
-├── app.py              # Backend FastAPI (API Entry Point)
-├── client.py           # CLI Client để tương tác với API
-├── models.py           # Pydantic schemas & Data models
-├── requirements.txt    # Danh sách thư viện Python
-├── Dockerfile          # Cấu hình Docker image
-├── docker-compose.yaml # Cấu hình Docker Compose
-├── static/             # Frontend Assets
-│   ├── index.html      # Giao diện chính
-│   ├── app.js          # Logic xử lý phía Client
-│   └── style.css       # Custom Tailwind/CSS styles
-└── storage/            # (Tự khởi tạo) Nơi lưu trữ audio và kết quả
-
-```
-
----
-
-## 🚀 Hướng dẫn cài đặt
-
-### Cách 1: Sử dụng Docker (Khuyên dùng)
-
-Nếu máy bạn đã cài Docker và Docker Compose:
-
-```bash
-git clone <your-repo-url>
-cd whisper-pro
-docker-compose up --build
-
-```
-
-Truy cập giao diện tại: `http://localhost:8000`
-
-### Cách 2: Cài đặt thủ công
-
-1. **Khởi tạo môi trường ảo:**
-```bash
 python -m venv venv
 source venv/bin/activate  # Linux/macOS
-# venv\Scripts\activate   # Windows
+# hoặc venv\Scripts\activate  # Windows
+Cài đặt thư viện:
 
-```
+Bash
 
-
-2. **Cài đặt Dependencies:**
-```bash
 pip install -r requirements.txt
+Cài đặt FFmpeg: Đảm bảo máy tính đã cài đặt ffmpeg.
 
-```
+Chạy ứng dụng:
 
+Bash
 
-3. **Khởi chạy Server:**
-```bash
-uvicorn app:app --host 0.0.0.0 --port 8000
+python app.py
 
-```
+API Endpoints chính
+Endpoint,Phương thức,Mô tả
+/api/transcribe,POST,Upload file âm thanh để phiên âm (Form-data)
+/api/tasks/{id},GET,Kiểm tra trạng thái và nhận kết quả phiên âm
+/api/meetings,POST,Tạo thông tin cuộc họp mới
+/api/meetings/{id}/process-recording,POST,Upload file ghi âm cuộc họp và tự động tóm tắt
+/api/meetings/calendar,GET,Lấy danh sách cuộc họp theo định dạng lịch
+/api/health,GET,Kiểm tra trạng thái hệ thống và database
+Sử dụng Client mẫu
+python client.py http://localhost:8000 path/to/your/audio.mp3 output.txt
 
+Cấu hình môi trường (Docker)
+Các biến môi trường quan trọng trong docker-compose.yaml:
 
+PRELOAD_MODEL: Model mặc định tải khi khởi động (ví dụ: tiny, base, large-v3).
 
----
+DATABASE_URL: Đường dẫn kết nối SQLite.
 
-## 🔌 Tài liệu API (API Documentation)
-
-Hệ thống tự động tạo tài liệu API tại: `http://localhost:8000/docs`
-
-### 🎙️ API Phiên âm
-
-| Method | Endpoint | Mô tả |
-| --- | --- | --- |
-| `POST` | `/api/transcribe` | Upload audio và bắt đầu phiên âm |
-| `GET` | `/api/tasks/{id}` | Kiểm tra trạng thái và nhận kết quả |
-
-### 📅 API Cuộc họp
-
-| Method | Endpoint | Mô tả |
-| --- | --- | --- |
-| `GET` | `/api/meetings` | Lấy danh sách toàn bộ cuộc họp |
-| `POST` | `/api/meetings` | Tạo cuộc họp mới |
-| `POST` | `/api/.../process` | Xử lý file ghi âm cho cuộc họp cụ thể |
-
----
-
-## 💻 CLI Client
-
-Bạn có thể sử dụng file `client.py` để phiên âm nhanh từ terminal:
-
-```bash
-python client.py http://localhost:8000 audio_sample.wav output.txt
-
-```
-
----
-
-## ⚙️ Công nghệ sử dụng
-
-* **Backend:** FastAPI (Python)
-* **AI Engine:** faster-whisper (CTranslate2)
-* **NLP:** Sumy, NLTK
-* **Frontend:** TailwindCSS, Vanilla JS, FullCalendar
-* **DevOps:** Docker, Uvicorn
-
----
-
-## 📌 Ghi chú & Tối ưu hóa
-
-* **Dữ liệu:** Hiện tại hệ thống đang lưu in-memory (sẽ mất khi restart server). Đối với môi trường Production, hãy cấu hình kết nối **PostgreSQL** hoặc **MongoDB**.
-* **Tăng tốc GPU:** Nếu máy có card đồ họa NVIDIA, hãy thay đổi cấu hình trong `app.py`:
-```python
-# Chỉnh sửa model config
-device="cuda", compute_type="float16"
-
-```
-
-
-
----
-
-*Phát triển bởi [Tên của bạn/Team]. Hy vọng Whisper Pro giúp ích cho công việc của bạn!*
-
----
-
+NVIDIA_VISIBLE_DEVICES: Đặt là all để sử dụng GPU.

@@ -2,8 +2,17 @@ from fastapi import FastAPI, File, UploadFile, BackgroundTasks, HTTPException, Q
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field, EmailStr, validator
-from typing import List, Optional, Dict, Any, Annotated
+from pydantic import BaseModel, Field, field_validator, ConfigDict
+# `ValidationInfo` location can vary between pydantic releases; try fallbacks
+try:
+    from pydantic.functional_validators import ValidationInfo
+except Exception:
+    try:
+        from pydantic import ValidationInfo
+    except Exception:
+        from typing import Any
+        ValidationInfo = Any
+from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 from enum import Enum
 import os
@@ -16,6 +25,7 @@ import time
 import requests
 from pathlib import Path
 import tempfile
+import json
 from faster_whisper import WhisperModel, BatchedInferencePipeline
 from sumy.parsers.plaintext import PlaintextParser
 from sumy.nlp.tokenizers import Tokenizer
@@ -25,6 +35,11 @@ from sumy.utils import get_stop_words
 from concurrent.futures import ThreadPoolExecutor
 import nltk
 
+# --- Import từ database và models ---
+from sqlalchemy.orm import Session
+from database import get_db, engine, Base
+from models import Meeting
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -32,12 +47,79 @@ logging.basicConfig(
 )
 logger = logging.getLogger("whisper-api")
 
-# Create temp directory for uploads
+# Tải dữ liệu NLTK (chỉ cần một lần)
+try:
+    nltk.download('punkt', quiet=True)
+except:
+    pass
+
+# ==================== APP INITIALIZATION ====================
+
+app = FastAPI(
+    title="Whisper Transcription API with Meeting Management",
+    description="High-performance speech-to-text API with integrated meeting management",
+    version="2.0.0",
+)
+
+
+@app.on_event("startup")
+async def preload_default_model():
+    """Schedule model preload in background so startup isn't blocked.
+    Uses `PRELOAD_MODEL` env var to choose model size (default: large-v3).
+    """
+    try:
+        model_size = os.environ.get("PRELOAD_MODEL", "large-v3")
+        logger.info(f"Scheduling background preload for model: {model_size}")
+
+        default_options = TranscriptionOptions(model_size=model_size)
+
+        # Schedule model loading in background thread so server can start immediately
+        async def _bg_load():
+            try:
+                logger.info("Background model preload started...")
+                await asyncio.to_thread(get_or_load_model, default_options)
+                logger.info("Background model preload complete.")
+            except Exception as e:
+                logger.error(f"Background model preload failed: {e}")
+
+        asyncio.create_task(_bg_load())
+
+    except Exception as e:
+        logger.error(f"Model preload scheduling failed: {e}")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Tạo các thư mục cần thiết
+os.makedirs("static", exist_ok=True)
+os.makedirs("templates", exist_ok=True)
+os.makedirs("data", exist_ok=True)
+
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# ==================== TEMP FILE CONFIG ====================
+
 UPLOAD_DIR = Path(tempfile.gettempdir()) / "whisper_uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
 
-# ==================== MODELS FOR MEETING MANAGEMENT ====================
+# ==================== TẠO DATABASE TABLES ====================
 
+Base.metadata.create_all(bind=engine)
+
+# ==================== DATA STORES ====================
+
+transcription_tasks = {}
+model_cache = {}
+executor = ThreadPoolExecutor(max_workers=4)
+
+# ==================== PYDANTIC MODELS ====================
+
+# Meeting Models
 class MeetingStatus(str, Enum):
     DRAFT = "draft"
     SCHEDULED = "scheduled"
@@ -47,7 +129,7 @@ class MeetingStatus(str, Enum):
 
 class Participant(BaseModel):
     name: str = Field(..., min_length=1, description="Tên người tham dự")
-    email: Optional[EmailStr] = None
+    email: Optional[str] = None
     role: Optional[str] = None
     department: Optional[str] = None
     is_required: bool = True
@@ -64,11 +146,14 @@ class MeetingBase(BaseModel):
     recurrence_rule: Optional[str] = None
     tags: List[str] = []
     
-    @validator('end_time')
-    def validate_time_range(cls, end_time, values):
-        if 'start_time' in values and end_time <= values['start_time']:
+    @field_validator('end_time')
+    @classmethod
+    def validate_time_range(cls, v: datetime, info: ValidationInfo) -> datetime:
+        """Validate that end_time is after start_time"""
+        start_time = info.data.get('start_time')
+        if start_time and v <= start_time:
             raise ValueError('Thời gian kết thúc phải sau thời gian bắt đầu')
-        return end_time
+        return v
 
 class MeetingCreate(MeetingBase):
     participants: List[Participant] = []
@@ -82,9 +167,10 @@ class MeetingUpdate(BaseModel):
     location: Optional[str] = None
     status: Optional[MeetingStatus] = None
     participants: Optional[List[Participant]] = None
+    tags: Optional[List[str]] = None
 
 class MeetingInDB(MeetingBase):
-    id: str = Field(..., alias="_id")
+    id: str
     participants: List[Participant] = []
     created_at: datetime
     updated_at: datetime
@@ -92,11 +178,13 @@ class MeetingInDB(MeetingBase):
     transcription_id: Optional[str] = None
     summary: Optional[str] = None
     
-    class Config:
-        allow_population_by_field_name = True
+    # Cấu hình Pydantic V2
+    model_config = ConfigDict(
+        from_attributes=True,
+        populate_by_name=True
+    )
 
-# ==================== ORIGINAL TRANSCRIPTION MODELS ====================
-
+# Transcription Models
 class TranscriptionOptions(BaseModel):
     model_size: str = Field("large-v3", description="Model size to use for transcription")
     device: str = Field("cpu", description="Device to use for computation (cuda, cpu)")
@@ -136,57 +224,83 @@ class TranscriptionResult(BaseModel):
     language: str
     language_probability: float
 
-# ==================== FASTAPI APP INITIALIZATION ====================
-
-app = FastAPI(
-    title="Whisper Transcription API with Meeting Management",
-    description="High-performance speech-to-text API with integrated meeting management",
-    version="2.0.0",
-)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-app.mount("/static", StaticFiles(directory="static"), name="static")
-
-# ==================== DATA STORES ====================
-
-transcription_tasks = {}
-model_cache = {}
-meetings_db = {}  # In production, replace with real database
-executor = ThreadPoolExecutor(max_workers=4)
-
 # ==================== MEETING MANAGEMENT ENDPOINTS ====================
 
 @app.post("/api/meetings", response_model=MeetingInDB)
-async def create_meeting(meeting: MeetingCreate):
+async def create_meeting(meeting: MeetingCreate, db: Session = Depends(get_db)):
     """Tạo cuộc họp mới"""
     meeting_id = str(uuid.uuid4())
     now = datetime.now()
     
-    meeting_data = MeetingInDB(
-        _id=meeting_id,
-        **meeting.dict(exclude={"participants"}),
-        participants=meeting.participants,
+    # Create meeting in database
+    db_meeting = Meeting(
+        id=meeting_id,
+        title=meeting.title,
+        description=meeting.description,
+        start_time=meeting.start_time,
+        end_time=meeting.end_time,
+        location_type=meeting.location_type,
+        location=meeting.location,
+        organizer=meeting.organizer,
+        status=meeting.status.value,
         created_at=now,
         updated_at=now
     )
     
-    meetings_db[meeting_id] = meeting_data.dict(by_alias=True)
+    # Xử lý tags
+    if meeting.tags:
+        db_meeting.set_tags_list(meeting.tags)
+    
+    db.add(db_meeting)
+    db.commit()
+    db.refresh(db_meeting)
+    
     logger.info(f"Created meeting: {meeting_id} - {meeting.title}")
-    return meeting_data
+    
+    # Return response
+    return MeetingInDB(
+        id=meeting_id,
+        title=meeting.title,
+        description=meeting.description,
+        start_time=meeting.start_time,
+        end_time=meeting.end_time,
+        location_type=meeting.location_type,
+        location=meeting.location,
+        organizer=meeting.organizer,
+        status=meeting.status,
+        tags=meeting.tags,
+        participants=meeting.participants,
+        created_at=now,
+        updated_at=now
+    )
 
 @app.get("/api/meetings/{meeting_id}", response_model=MeetingInDB)
-async def get_meeting(meeting_id: str):
+async def get_meeting(meeting_id: str, db: Session = Depends(get_db)):
     """Lấy thông tin một cuộc họp"""
-    if meeting_id not in meetings_db:
+    meeting = db.query(Meeting).filter(Meeting.id == meeting_id).first()
+    
+    if not meeting:
         raise HTTPException(status_code=404, detail="Không tìm thấy cuộc họp")
-    return meetings_db[meeting_id]
+    
+    # Convert back to MeetingInDB format
+    return MeetingInDB(
+        id=meeting.id,
+        title=meeting.title,
+        description=meeting.description,
+        start_time=meeting.start_time,
+        end_time=meeting.end_time,
+        location_type=meeting.location_type,
+        location=meeting.location,
+        organizer=meeting.organizer,
+        status=MeetingStatus(meeting.status),
+        tags=meeting.get_tags_list(),
+        participants=[],  # Participants stored separately if needed
+        created_at=meeting.created_at,
+        updated_at=meeting.updated_at,
+        audio_file_path=meeting.audio_file_path,
+        transcription_id=meeting.transcription_id,
+        summary=meeting.summary
+    )
 
 @app.get("/api/meetings", response_model=List[MeetingInDB])
 async def list_meetings(
@@ -194,89 +308,147 @@ async def list_meetings(
     organizer: Optional[str] = None,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
-    limit: int = 50
+    limit: int = 50,
+    db: Session = Depends(get_db)
 ):
     """Lấy danh sách cuộc họp với bộ lọc"""
-    meetings = list(meetings_db.values())
+    query = db.query(Meeting)
     
     if status:
-        meetings = [m for m in meetings if m["status"] == status]
+        query = query.filter(Meeting.status == status.value)
     if organizer:
-        meetings = [m for m in meetings if m["organizer"] == organizer]
+        query = query.filter(Meeting.organizer == organizer)
     if start_date:
-        meetings = [m for m in meetings if m["start_time"] >= start_date]
+        query = query.filter(Meeting.start_time >= start_date)
     if end_date:
-        meetings = [m for m in meetings if m["end_time"] <= end_date]
+        query = query.filter(Meeting.end_time <= end_date)
     
     # Sort by start time (newest first)
-    meetings.sort(key=lambda x: x["start_time"], reverse=True)
+    meetings = query.order_by(Meeting.start_time.desc()).limit(limit).all()
     
-    return meetings[:limit]
+    # Convert to MeetingInDB
+    result = []
+    for meeting in meetings:
+        result.append(MeetingInDB(
+            id=meeting.id,
+            title=meeting.title,
+            description=meeting.description,
+            start_time=meeting.start_time,
+            end_time=meeting.end_time,
+            location_type=meeting.location_type,
+            location=meeting.location,
+            organizer=meeting.organizer,
+            status=MeetingStatus(meeting.status),
+            tags=meeting.get_tags_list(),
+            participants=[],  # Participants stored separately if needed
+            created_at=meeting.created_at,
+            updated_at=meeting.updated_at,
+            audio_file_path=meeting.audio_file_path,
+            transcription_id=meeting.transcription_id,
+            summary=meeting.summary
+        ))
+    
+    return result
 
 @app.put("/api/meetings/{meeting_id}", response_model=MeetingInDB)
-async def update_meeting(meeting_id: str, meeting_update: MeetingUpdate):
+async def update_meeting(
+    meeting_id: str,
+    meeting_update: MeetingUpdate,
+    db: Session = Depends(get_db)
+):
     """Cập nhật thông tin cuộc họp"""
-    if meeting_id not in meetings_db:
-        raise HTTPException(status_code=404, detail="Không tìm thấy cuộc họp")
+    meeting = db.query(Meeting).filter(Meeting.id == meeting_id).first()
     
-    current_meeting = meetings_db[meeting_id]
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Không tìm thấy cuộc họp")
     
     # Update fields
-    update_data = meeting_update.dict(exclude_unset=True)
+    update_data = meeting_update.model_dump(exclude_unset=True)
     for field, value in update_data.items():
-        if field == "participants" and value is not None:
-            current_meeting[field] = value
+        if field == "status" and value:
+            setattr(meeting, field, value.value)
+        elif field == "tags" and value:
+            meeting.set_tags_list(value)
         elif value is not None:
-            current_meeting[field] = value
+            setattr(meeting, field, value)
     
-    current_meeting["updated_at"] = datetime.now()
-    meetings_db[meeting_id] = current_meeting
+    meeting.updated_at = datetime.now()
+    db.commit()
+    db.refresh(meeting)
     
     logger.info(f"Updated meeting: {meeting_id}")
-    return current_meeting
+    
+    return MeetingInDB(
+        id=meeting.id,
+        title=meeting.title,
+        description=meeting.description,
+        start_time=meeting.start_time,
+        end_time=meeting.end_time,
+        location_type=meeting.location_type,
+        location=meeting.location,
+        organizer=meeting.organizer,
+        status=MeetingStatus(meeting.status),
+        tags=meeting.get_tags_list(),
+        participants=[],  # Participants stored separately if needed
+        created_at=meeting.created_at,
+        updated_at=meeting.updated_at,
+        audio_file_path=meeting.audio_file_path,
+        transcription_id=meeting.transcription_id,
+        summary=meeting.summary
+    )
 
 @app.delete("/api/meetings/{meeting_id}")
-async def delete_meeting(meeting_id: str):
+async def delete_meeting(meeting_id: str, db: Session = Depends(get_db)):
     """Xóa cuộc họp"""
-    if meeting_id not in meetings_db:
+    meeting = db.query(Meeting).filter(Meeting.id == meeting_id).first()
+    
+    if not meeting:
         raise HTTPException(status_code=404, detail="Không tìm thấy cuộc họp")
     
-    del meetings_db[meeting_id]
+    db.delete(meeting)
+    db.commit()
+    
     logger.info(f"Deleted meeting: {meeting_id}")
     return {"message": "Đã xóa cuộc họp thành công", "meeting_id": meeting_id}
 
 @app.get("/api/meetings/calendar")
 async def get_calendar_events(
     start: datetime = Query(..., description="Ngày bắt đầu (ISO format)"),
-    end: datetime = Query(..., description="Ngày kết thúc (ISO format)")
+    end: datetime = Query(..., description="Ngày kết thúc (ISO format)"),
+    db: Session = Depends(get_db)
 ):
     """Lấy sự kiện cho calendar view (tương thích FullCalendar)"""
     events = []
-    for meeting_id, meeting in meetings_db.items():
-        if start <= meeting["end_time"] and end >= meeting["start_time"]:
-            status_colors = {
-                "draft": "#6B7280",
-                "scheduled": "#3B82F6",
-                "in_progress": "#F59E0B",
-                "completed": "#10B981",
-                "cancelled": "#EF4444",
+    
+    # Query meetings within date range
+    meetings = db.query(Meeting).filter(
+        Meeting.start_time >= start,
+        Meeting.end_time <= end
+    ).all()
+    
+    for meeting in meetings:
+        status_colors = {
+            "draft": "#6B7280",
+            "scheduled": "#3B82F6",
+            "in_progress": "#F59E0B",
+            "completed": "#10B981",
+            "cancelled": "#EF4444",
+        }
+        
+        events.append({
+            "id": meeting.id,
+            "title": meeting.title,
+            "start": meeting.start_time.isoformat(),
+            "end": meeting.end_time.isoformat(),
+            "location": meeting.location or "",
+            "organizer": meeting.organizer,
+            "status": meeting.status,
+            "color": status_colors.get(meeting.status, "#3B82F6"),
+            "extendedProps": {
+                "description": meeting.description or "",
+                "location_type": meeting.location_type or "physical",
             }
-            
-            events.append({
-                "id": meeting_id,
-                "title": meeting["title"],
-                "start": meeting["start_time"].isoformat(),
-                "end": meeting["end_time"].isoformat(),
-                "location": meeting.get("location", ""),
-                "organizer": meeting["organizer"],
-                "status": meeting["status"],
-                "color": status_colors.get(meeting["status"], "#3B82F6"),
-                "extendedProps": {
-                    "description": meeting.get("description", ""),
-                    "participants": len(meeting.get("participants", [])),
-                    "location_type": meeting.get("location_type", "physical"),
-                }
-            })
+        })
     
     return events
 
@@ -284,7 +456,8 @@ async def get_calendar_events(
 async def process_meeting_recording(
     meeting_id: str,
     file: UploadFile = File(...),
-    background_tasks: BackgroundTasks = BackgroundTasks()
+    background_tasks: BackgroundTasks = BackgroundTasks(),
+    db: Session = Depends(get_db)
 ):
     """
     Upload ghi âm cuộc họp và tự động xử lý:
@@ -292,17 +465,20 @@ async def process_meeting_recording(
     2. Tạo tóm tắt
     3. Lưu kết quả vào thông tin cuộc họp
     """
-    if meeting_id not in meetings_db:
+    meeting = db.query(Meeting).filter(Meeting.id == meeting_id).first()
+    
+    if not meeting:
         raise HTTPException(status_code=404, detail="Không tìm thấy cuộc họp")
     
     # Save temporary file
-    file_path = UPLOAD_DIR / f"meeting_{meeting_id}_{file.filename}"
+    file_path = UPLOAD_DIR / f"meeting_{meeting_id}_{uuid.uuid4().hex}_{file.filename}"
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
     
     # Update meeting info
-    meetings_db[meeting_id]["audio_file_path"] = str(file_path)
-    meetings_db[meeting_id]["updated_at"] = datetime.now()
+    meeting.audio_file_path = str(file_path)
+    meeting.updated_at = datetime.now()
+    db.commit()
     
     # Start background processing
     background_tasks.add_task(
@@ -320,86 +496,116 @@ async def process_meeting_recording(
 
 async def process_meeting_audio(meeting_id: str, file_path: str):
     """Xử lý audio cuộc họp: phiên âm và tóm tắt"""
+    db = next(get_db())
     try:
         logger.info(f"Processing audio for meeting {meeting_id}: {file_path}")
         
-        # 1. Transcribe using existing Whisper system
-        with open(file_path, "rb") as f:
-            files = {"file": (Path(file_path).name, f)}
-            form_data = {
-                "model_size": "base",
-                "language": "vi",
-                "word_timestamps": "false",
-                "vad_filter": "true"
-            }
-            
-            # Call internal transcription API
-            response = requests.post(
-                "http://localhost:8000/api/transcribe",
-                files=files,
-                data=form_data,
-                timeout=30
+        # 1. Transcribe using Whisper
+        try:
+            # Tạo options cho transcription
+            options = TranscriptionOptions(
+                model_size="base",
+                device="cpu",
+                compute_type="int8",
+                language="vi",
+                word_timestamps=False,
+                vad_filter=True,
+                use_batched_mode=False
             )
             
-            if response.status_code == 202:
-                task_id = response.json()["id"]
+            # Get or load model
+            key = f"{options.model_size}_{options.device}_{options.compute_type}"
+            if key not in model_cache:
+                logger.info(f"Loading model for meeting transcription: {options.model_size}")
+                model = WhisperModel(
+                    options.model_size,
+                    device=options.device,
+                    compute_type=options.compute_type,
+                    download_root=os.environ.get("MODEL_DIR", None)
+                )
+                model_cache[key] = model
+            
+            model = model_cache[key]
+            
+            # Run transcription
+            logger.info(f"Starting transcription for meeting {meeting_id}")
+            segments, info = model.transcribe(
+                file_path,
+                beam_size=5,
+                language="vi",
+                vad_filter=True,
+                vad_parameters={
+                    "threshold": 0.5,
+                    "min_speech_duration_ms": 250,
+                    "min_silence_duration_ms": 2000
+                }
+            )
+            
+            # Convert to list and get transcript text
+            segments_list = list(segments)
+            transcript_text = " ".join([segment.text for segment in segments_list])
+            
+            logger.info(f"Transcription completed for meeting {meeting_id}, {len(segments_list)} segments")
+            
+            # 2. Create summary from transcript
+            summary = await summarize_text_async(transcript_text, "vi")
+            
+            # 3. Update meeting info in database
+            meeting = db.query(Meeting).filter(Meeting.id == meeting_id).first()
+            
+            if meeting:
+                # Lưu transcription result vào file
+                transcription_id = str(uuid.uuid4())
+                transcription_result = {
+                    "segments": [
+                        {
+                            "id": i,
+                            "start": seg.start,
+                            "end": seg.end,
+                            "text": seg.text
+                        }
+                        for i, seg in enumerate(segments_list)
+                    ],
+                    "language": info.language,
+                    "full_text": transcript_text
+                }
                 
-                # Wait for transcription result
-                for i in range(30):  # Timeout 60s
-                    await asyncio.sleep(2)
-                    
-                    task_resp = requests.get(
-                        f"http://localhost:8000/api/tasks/{task_id}",
-                        timeout=10
-                    )
-                    
-                    if task_resp.status_code == 200:
-                        task_data = task_resp.json()
-                        
-                        if task_data["status"] == "completed":
-                            # 2. Create summary from transcript
-                            transcript_text = " ".join(
-                                [seg["text"] for seg in task_data["result"]["segments"]]
-                            )
-                            
-                            # Call summarization API
-                            summary_response = requests.post(
-                                "http://localhost:8000/api/summarize",
-                                json={
-                                    "full_transcript": transcript_text,
-                                    "language_code": "vi"
-                                },
-                                timeout=30
-                            )
-                            
-                            summary = ""
-                            if summary_response.status_code == 200:
-                                summary = summary_response.json().get("summary", "")
-                            
-                            # 3. Update meeting info
-                            meetings_db[meeting_id]["transcription_id"] = task_id
-                            meetings_db[meeting_id]["summary"] = summary
-                            meetings_db[meeting_id]["status"] = "completed"
-                            meetings_db[meeting_id]["updated_at"] = datetime.now()
-                            
-                            logger.info(f"Finished processing audio for meeting {meeting_id}")
-                            break
-                        
-                        elif task_data["status"] == "failed":
-                            logger.error(f"Transcription failed for meeting {meeting_id}: {task_data.get('error')}")
-                            break
+                # Lưu transcription vào file
+                transcription_file = Path(file_path).parent / f"transcription_{transcription_id}.json"
+                with open(transcription_file, 'w', encoding='utf-8') as f:
+                    json.dump(transcription_result, f, ensure_ascii=False, indent=2)
                 
-                # Cleanup temp file
-                try:
-                    if os.path.exists(file_path):
-                        os.unlink(file_path)
-                except Exception as e:
-                    logger.error(f"Error removing temp file: {e}")
-                    
+                meeting.transcription_id = transcription_id
+                meeting.summary = summary
+                meeting.status = "completed"
+                meeting.updated_at = datetime.now()
+                db.commit()
+                
+                logger.info(f"Finished processing audio for meeting {meeting_id}")
+            
+        except Exception as e:
+            logger.error(f"Transcription error for meeting {meeting_id}: {str(e)}")
+            # Update meeting status to indicate failure
+            meeting = db.query(Meeting).filter(Meeting.id == meeting_id).first()
+            if meeting:
+                meeting.status = "cancelled"
+                meeting.updated_at = datetime.now()
+                db.commit()
+        
+        # Cleanup temp file
+        try:
+            if os.path.exists(file_path):
+                os.unlink(file_path)
+                logger.info(f"Cleaned up temp file: {file_path}")
+        except Exception as e:
+            logger.error(f"Error removing temp file: {e}")
+            
     except Exception as e:
         logger.error(f"Error processing meeting audio for {meeting_id}: {str(e)}")
+    finally:
+        db.close()
 
-# ==================== ORIGINAL TRANSCRIPTION ENDPOINTS ====================
+# ==================== TRANSCRIPTION ENDPOINTS ====================
 
 def get_or_load_model(options: TranscriptionOptions):
     """Get or load a model based on transcription options"""
@@ -421,7 +627,7 @@ async def summarize_text_async(text: str, language_code: str) -> Optional[str]:
     """Runs the Sumy summarization task in a separate thread."""
     language_map = {
         "en": "english",
-        "vi": "english",
+        "vi": "english",  # Sumy không hỗ trợ tiếng Việt nên dùng English tokenizer
         "fr": "french",
         "de": "german",
         "es": "spanish",
@@ -439,10 +645,7 @@ async def summarize_text_async(text: str, language_code: str) -> Optional[str]:
             return "Văn bản quá ngắn để tóm tắt."
             
         try:
-            if LANGUAGE == "english":
-                parser = PlaintextParser.from_string(text_to_summarize, Tokenizer(LANGUAGE))
-            else:
-                parser = PlaintextParser.from_string(text_to_summarize, Tokenizer("english"))
+            parser = PlaintextParser.from_string(text_to_summarize, Tokenizer("english"))
             
             stemmer = Stemmer(LANGUAGE)
             summarizer = LsaSummarizer(stemmer)
@@ -468,14 +671,6 @@ async def process_transcription(task_id: str, file_path: str, options: Transcrip
         # Get or load the model
         model = get_or_load_model(options)
         
-        # Create batched pipeline if requested
-        if options.use_batched_mode:
-            pipeline = BatchedInferencePipeline(
-                model=model,
-            )
-        else:
-            pipeline = model
-        
         # Prepare transcription kwargs
         kwargs = {
             "beam_size": options.beam_size,
@@ -492,13 +687,18 @@ async def process_transcription(task_id: str, file_path: str, options: Transcrip
         if options.vad_parameters:
             kwargs["vad_parameters"] = options.vad_parameters
             
-        # Add batch size if using batched mode
-        if options.use_batched_mode:
-            kwargs["batch_size"] = options.batch_size
+        # Do not pass `batch_size` directly to WhisperModel.transcribe()
+        # (the upstream faster-whisper WhisperModel.transcribe doesn't accept it).
+        # If batched inference is required, a separate BatchedInferencePipeline should be used.
+        # Here we simply avoid passing `batch_size` to prevent TypeError.
         
         # Run transcription
         start_time = datetime.now()
-        segments, info = pipeline.transcribe(file_path, **kwargs)
+        # Ensure batch_size is not in kwargs
+        if 'batch_size' in kwargs:
+            del kwargs['batch_size']
+
+        segments, info = model.transcribe(file_path, **kwargs)
         
         # Convert generator to list to complete transcription
         segments_list = list(segments)
@@ -592,14 +792,34 @@ def parse_form_options(
 async def read_root():
     """Serve the main HTML page"""
     try:
+        # Tạo file index.html mẫu nếu không tồn tại
+        if not os.path.exists("templates/index.html"):
+            os.makedirs("templates", exist_ok=True)
+            with open("templates/index.html", "w", encoding="utf-8") as f:
+                f.write("""<!DOCTYPE html>
+<html>
+<head>
+    <title>Whisper Transcription API</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+    <h1>Whisper Transcription API with Meeting Management</h1>
+    <p>API đang chạy. Sử dụng các endpoint để tương tác.</p>
+    <ul>
+        <li><a href="/docs">API Documentation (Swagger UI)</a></li>
+        <li><a href="/redoc">API Documentation (ReDoc)</a></li>
+        <li><a href="/api/health">Health Check</a></li>
+    </ul>
+</body>
+</html>""")
+        
         with open("templates/index.html", "r", encoding="utf-8") as f:
             html_content = f.read()
         return HTMLResponse(content=html_content)
-    except FileNotFoundError:
-        return HTMLResponse(content="<h1>Template not found. Please check if templates/index.html exists.</h1>", status_code=404)
     except Exception as e:
         logger.error(f"Error loading template: {e}")
-        return HTMLResponse(content=f"<h1>Error loading page: {str(e)}</h1>", status_code=500)
+        return HTMLResponse(content=f"<h1>Error: {str(e)}</h1>", status_code=500)
 
 @app.post("/api/transcribe", response_model=TranscriptionTask)
 async def transcribe_audio(
@@ -686,15 +906,29 @@ async def list_tasks(limit: int = 10, status: Optional[str] = None):
     return tasks[:limit]
 
 @app.get("/api/health")
-async def health_check():
+async def health_check(db: Session = Depends(get_db)):
     """
     Health check endpoint
     """
+    try:
+        # Check database connection
+        db.execute("SELECT 1")
+        db_status = "connected"
+        
+        # Count meetings
+        meetings_count = db.query(Meeting).count()
+        
+    except Exception as e:
+        db_status = f"error: {str(e)}"
+        meetings_count = 0
+    
     return {
         "status": "healthy", 
         "timestamp": datetime.now().isoformat(),
-        "meetings_count": len(meetings_db),
-        "transcription_tasks": len(transcription_tasks)
+        "database": db_status,
+        "meetings_count": meetings_count,
+        "transcription_tasks": len(transcription_tasks),
+        "model_cache_size": len(model_cache)
     }
 
 @app.delete("/api/tasks/{task_id}")
@@ -714,7 +948,3 @@ if __name__ == "__main__":
     host = os.environ.get("HOST", "0.0.0.0")
     
     uvicorn.run("app:app", host=host, port=port, reload=True)
-    
-@app.get("/login.html")
-async def fake_login():
-    return {"ERROR": "LOGIN PAGE NO LONGER EXISTS"}
