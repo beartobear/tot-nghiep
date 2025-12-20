@@ -1,0 +1,16 @@
+# Media files
+*.mp4
+*.gif
+
+# Python
+__pycache__/
+*.pyc
+
+# Virtual environment
+venv/
+.env/
+.venv/
+
+# IDE
+.vscode/
+.idea/

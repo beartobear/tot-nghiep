@@ -1,0 +1,59 @@
+services:
+  whisper-api:
+    container_name: whisper-api
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    ports:
+      - "8000:8000"
+
+    volumes:
+      # Project data
+      - ./models:/app/models
+      - ./data:/app/data
+      - ./samples:/app/samples
+
+      # Static & templates (mount folder only)
+      - ./static:/app/static
+      - ./templates:/app/templates
+
+      # Persist NLTK data
+      - nltk_data:/usr/share/nltk_data
+
+    environment:
+      # App config
+      MODEL_DIR: /app/models
+      HOST: 0.0.0.0
+      PORT: 8000
+      DEBUG: "True"
+
+      # NLTK
+      NLTK_DATA: /usr/share/nltk_data
+
+      # Timezone
+      TZ: Asia/Ho_Chi_Minh
+
+      # Python
+      PYTHONUNBUFFERED: "1"
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+    restart: unless-stopped
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+
+volumes:
+  nltk_data:

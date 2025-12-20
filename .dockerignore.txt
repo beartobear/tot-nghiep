@@ -1,0 +1,14 @@
+# Bỏ qua các thư mục cache Python/Hugging Face
+__pycache__/
+*.pyc
+.ipynb_checkpoints
+.pytest_cache
+
+# Bỏ qua các thư mục cache/tải mô hình của Faster-Whisper và Hugging Face
+models/
+.cache/
+*faster-whisper*
+
+# Bỏ qua các thư mục cache phổ biến của Linux
+/root/.cache
+/home/user/.cache
