@@ -1,0 +1,16 @@
+{
+  "segments": [
+    {
+      "id": 0,
+      "start": 1.33,
+      "end": 3.33,
+      "text": " Hello, I'm the pay"
+    }
+  ],
+  "language": "vi",
+  "language_probability": 1,
+  "full_text": " Hello, I'm the pay",
+  "meeting_id": "b78e7a71-775b-44ef-b3d9-ad16ed5d7de9",
+  "audio_path": "data/meeting_audio/meeting_b78e7a71-775b-44ef-b3d9-ad16ed5d7de9_20251223_202637_meeting_b78e7a71-775b-44ef-b3d9-ad16ed5d7de9_1766521597674.webm",
+  "created_at": "2025-12-23T20:26:55.676960"
+}

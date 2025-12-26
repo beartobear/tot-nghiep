@@ -1,0 +1,83 @@
+/* Meeting Recording Styles */
+.meeting-audio-badge {
+    display: inline-flex;
+    align-items: center;
+    background: linear-gradient(135deg, #3B82F6 0%, #1D4ED8 100%);
+    color: white;
+    padding: 4px 8px;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    margin-left: 8px;
+}
+
+.meeting-audio-badge::before {
+    content: "🎤";
+    margin-right: 4px;
+}
+
+.recording-active {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    z-index: 1000;
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0% {
+        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+    }
+    70% {
+        box-shadow: 0 0 0 10px rgba(239, 68, 68, 0);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+    }
+}
+
+.audio-controls {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.audio-controls button {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-size: 0.875rem;
+    transition: all 0.2s;
+}
+
+.audio-controls button:hover {
+    transform: translateY(-1px);
+}
+
+.meeting-recording-indicator {
+    display: inline-flex;
+    align-items: center;
+    background: #FEE2E2;
+    color: #DC2626;
+    padding: 2px 8px;
+    border-radius: 8px;
+    font-size: 0.75rem;
+    margin-left: 8px;
+}
+
+.meeting-recording-indicator::before {
+    content: "";
+    width: 8px;
+    height: 8px;
+    background: #DC2626;
+    border-radius: 50%;
+    margin-right: 4px;
+    animation: blink 1s infinite;
+}
+
+@keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
