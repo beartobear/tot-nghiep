@@ -1,79 +1,144 @@
-🎙️ Whisper Transcription API with Meeting Management
-Hệ thống cung cấp API chuyển đổi giọng nói thành văn bản (Speech-to-Text) hiệu suất cao sử dụng Faster-Whisper, tích hợp quản lý cuộc họp, tự động tóm tắt nội dung và lưu trữ dữ liệu.
+# WHISPER PRO  
+## HỆ THỐNG CHUYỂN GIỌNG NÓI THÀNH VĂN BẢN  
+## VÀ QUẢN LÝ CUỘC HỌP ỨNG DỤNG TRÍ TUỆ NHÂN TẠO
 
-✨ Tính năng chính
-Transcription Hiệu Suất Cao: Sử dụng faster-whisper hỗ trợ tăng tốc trên cả CPU và GPU (NVIDIA CUDA).
+---
 
-Quản lý Cuộc họp: API đầy đủ cho các thao tác CRUD (Tạo, Đọc, Cập nhật, Xóa) cuộc họp.
+## 1. GIỚI THIỆU ĐỀ TÀI
 
-Tự động Tóm tắt: Sử dụng thư viện sumy (LSA Summarizer) để tóm tắt nội dung sau khi phiên âm.
+Trong bối cảnh chuyển đổi số và sự phát triển mạnh mẽ của trí tuệ nhân tạo, việc tự động hóa quá trình ghi nhận, lưu trữ và xử lý nội dung các cuộc họp ngày càng trở nên cần thiết. Các cuộc họp truyền thống thường gặp khó khăn trong việc ghi chép đầy đủ nội dung, tốn nhiều thời gian tổng hợp và dễ xảy ra sai sót.
 
-Xử lý Bất đồng bộ: File âm thanh được xử lý dưới background task để không gây nghẽn API.
+Đề tài **“Whisper Pro – Hệ thống chuyển giọng nói thành văn bản và quản lý cuộc họp”** được thực hiện nhằm xây dựng một hệ thống ứng dụng AI để:
+- Tự động chuyển giọng nói thành văn bản (Speech-to-Text)
+- Hỗ trợ ghi âm và quản lý nội dung các cuộc họp
+- Tóm tắt nội dung cuộc họp nhằm tiết kiệm thời gian cho người dùng
 
-Hỗ trợ Lịch (Calendar): Endpoint trả về dữ liệu tương thích với FullCalendar.
+Hệ thống được phát triển theo mô hình **Client – Server**, gồm **Backend xử lý AI** và **Frontend giao diện web**.
 
-Dockerized: Sẵn sàng triển khai nhanh chóng với Docker và Docker Compose.
+---
 
-🛠️ Công nghệ sử dụng
-Backend: FastAPI (Python 3.10+)
+## 2. MỤC TIÊU ĐỀ TÀI
 
-AI Model: Faster-Whisper (Large-v3, Base, etc.)
+### 2.1. Mục tiêu tổng quát
+Xây dựng một hệ thống web hoàn chỉnh ứng dụng trí tuệ nhân tạo để chuyển giọng nói thành văn bản và hỗ trợ quản lý cuộc họp một cách hiệu quả.
 
-Database: SQLAlchemy với SQLite (mặc định)
+### 2.2. Mục tiêu cụ thể
+- Nghiên cứu mô hình Whisper cho bài toán Speech-to-Text
+- Xây dựng API xử lý phiên âm audio
+- Phát triển giao diện web thân thiện cho người dùng
+- Quản lý cuộc họp, lịch họp và người tham dự
+- Tự động tóm tắt nội dung cuộc họp
+- Đảm bảo hệ thống hoạt động ổn định và mở rộng được
 
-Summarization: Sumy (Natural Language Processing)
+---
 
-Containerization: Docker, NVIDIA Container Toolkit (cho GPU)
+## 3. PHẠM VI ĐỀ TÀI
 
-Cách 1: Sử dụng Docker (Khuyến nghị)
-Yêu cầu: Đã cài đặt Docker và Docker Compose. Nếu dùng GPU, hãy cài thêm NVIDIA Container Toolkit.
+- Chuyển giọng nói thành văn bản từ file audio hoặc ghi âm trực tiếp
+- Quản lý cuộc họp ở quy mô nhỏ và trung bình
+- Ngôn ngữ chính: Tiếng Việt (có thể mở rộng)
+- Hệ thống phục vụ mục đích học tập, nghiên cứu và demo
 
-Clone dự án và di chuyển vào thư mục gốc.
+---
 
-Khởi chạy hệ thống:
+## 4. KIẾN TRÚC HỆ THỐNG
 
-Bash
+Hệ thống được thiết kế theo kiến trúc 2 tầng:
 
-docker-compose up -d --build
-Hệ thống sẽ tự động khởi tạo database tại data/app.db và chạy server tại cổng 8000.
+Frontend (Web Browser)
+│
+│ REST API
+▼
+Backend (FastAPI)
+│
+├── Whisper (Speech-to-Text)
+├── NLP Summarization (Sumy)
+└── SQLite Database
+---
 
-Cách 2: Cài đặt thủ công
-Tạo môi trường ảo:
+## 5. CÔNG NGHỆ SỬ DỤNG
 
-Bash
+### 5.1. Backend
+- Python 3
+- FastAPI
+- faster-whisper
+- SQLAlchemy
+- SQLite
+- Sumy, NLTK
+- Uvicorn
+- Docker, Docker Compose
 
+### 5.2. Frontend
+- HTML5
+- CSS3
+- JavaScript (Vanilla JS)
+- TailwindCSS
+- FullCalendar
+- MediaRecorder API
+
+---
+
+## 6. CÁC CHỨC NĂNG CHÍNH
+
+### 6.1. Chức năng chuyển giọng nói thành văn bản
+- Upload file audio
+- Ghi âm trực tiếp từ microphone
+- Xử lý phiên âm bất đồng bộ
+- Hiển thị kết quả theo đoạn và timestamp
+
+### 6.2. Chức năng quản lý cuộc họp
+- Tạo, chỉnh sửa, xóa cuộc họp
+- Quản lý người tham dự
+- Hiển thị lịch họp
+- Ghi âm và lưu trữ cuộc họp
+
+### 6.3. Chức năng tóm tắt nội dung
+- Tự động tóm tắt nội dung phiên âm
+- Hỗ trợ người dùng nắm nhanh nội dung chính
+
+---
+---
+
+## 7. TRIỂN KHAI HỆ THỐNG
+
+### 7.1. Cài đặt Backend
+
+```bash
 python -m venv venv
-source venv/bin/activate  # Linux/macOS
-# hoặc venv\Scripts\activate  # Windows
-Cài đặt thư viện:
-
-Bash
-
+source venv/bin/activate
 pip install -r requirements.txt
-Cài đặt FFmpeg: Đảm bảo máy tính đã cài đặt ffmpeg.
+uvicorn app:app --reload
 
-Chạy ứng dụng:
+Backend chạy tại: http://localhost:8000
+**8. ĐÁNH GIÁ KẾT QUẢ**
+8.1. Kết quả đạt được
 
-Bash
+Hệ thống hoạt động ổn định
 
-python app.py
+Phiên âm chính xác với tiếng Việt
 
-API Endpoints chính
-Endpoint,Phương thức,Mô tả
-/api/transcribe,POST,Upload file âm thanh để phiên âm (Form-data)
-/api/tasks/{id},GET,Kiểm tra trạng thái và nhận kết quả phiên âm
-/api/meetings,POST,Tạo thông tin cuộc họp mới
-/api/meetings/{id}/process-recording,POST,Upload file ghi âm cuộc họp và tự động tóm tắt
-/api/meetings/calendar,GET,Lấy danh sách cuộc họp theo định dạng lịch
-/api/health,GET,Kiểm tra trạng thái hệ thống và database
-Sử dụng Client mẫu
-python client.py http://localhost:8000 path/to/your/audio.mp3 output.txt
+Giao diện thân thiện, dễ sử dụng
 
-Cấu hình môi trường (Docker)
-Các biến môi trường quan trọng trong docker-compose.yaml:
+Quản lý cuộc họp hiệu quả
 
-PRELOAD_MODEL: Model mặc định tải khi khởi động (ví dụ: tiny, base, large-v3).
+8.2. Hạn chế
 
-DATABASE_URL: Đường dẫn kết nối SQLite.
+Tóm tắt tiếng Việt chưa tối ưu
 
-NVIDIA_VISIBLE_DEVICES: Đặt là all để sử dụng GPU.
+Chưa hỗ trợ phân quyền người dùng
+
+Chưa triển khai trên môi trường production lớn
+
+9. HƯỚNG PHÁT TRIỂN
+
+Nâng cao chất lượng tóm tắt tiếng Việt
+
+Tích hợp mô hình ngôn ngữ lớn (LLM)
+
+Phân quyền người dùng
+
+Lưu trữ cloud (S3, PostgreSQL)
+
+Triển khai trên Kubernetes
+
+
